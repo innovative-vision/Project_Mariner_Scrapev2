@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from browser_use import Agent
 from browser_use.browser.browser import Browser, BrowserConfig
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 load_dotenv()
 
