@@ -7,13 +7,13 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 load_dotenv()
 
-api_key = os.getenv("OPENROUTER_API_KEY")
+api_key = os.getenv("GEMINI_API_KEY")
 if not api_key:
-    raise ValueError("OPENROUTER_API_KEY not set. Add it to your .env file.")
+    raise ValueError("GEMINI_API_KEY not set. Add it to your .env file.")
 
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
-    google_api_key=os.getenv("GEMINI_API_KEY"),
+    google_api_key=api_key,
     temperature=0.0,
 )
 
@@ -35,7 +35,7 @@ async def run_task(task: str):
     return result
 
 if __name__ == "__main__":
-    print("Browser-Use Agent — Gemini Edition (via OpenRouter)")
+    print("Browser-Use Agent — Gemini Edition")
     print("Type your task below. The agent will browse the web and complete it.")
     print("Example: 'Go to reddit.com and find the top post in r/Python today'\n")
 
