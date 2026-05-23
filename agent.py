@@ -1,8 +1,7 @@
 import asyncio
 import os
 from dotenv import load_dotenv
-from browser_use import Agent
-from browser_use.browser.browser import Browser, BrowserConfig
+from browser_use import Agent, Browser, BrowserConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 load_dotenv()
@@ -19,7 +18,7 @@ llm = ChatGoogleGenerativeAI(
 
 browser = Browser(
     config=BrowserConfig(
-        headless=True,
+        headless=False,
     )
 )
 
@@ -37,7 +36,7 @@ async def run_task(task: str):
 if __name__ == "__main__":
     print("Browser-Use Agent — Gemini Edition")
     print("Type your task below. The agent will browse the web and complete it.")
-    print("Example: 'Go to reddit.com and find the top post in r/Python today'\n")
+    print("Example: 'Go to wikipedia.org and tell me the main topic on the homepage today'\n")
 
     task = input("Task: ").strip()
     if not task:
