@@ -11,10 +11,9 @@ api_key = os.getenv("OPENROUTER_API_KEY")
 if not api_key:
     raise ValueError("OPENROUTER_API_KEY not set. Add it to your .env file.")
 
-llm = ChatOpenAI(
-    model="google/gemini-2.5-flash",
-    openai_api_key=api_key,
-    openai_api_base="https://openrouter.ai/api/v1",
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0.0,
 )
 
