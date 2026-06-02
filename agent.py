@@ -1,102 +1,162 @@
-# Browser-Use Agent — Gemini Edition
+"""Browser-Use Agent — Gemini Edition (tiered trust/autonomy model).
 
-Open-source browser automation agent powered by [browser-use](https://github.com/browser-use/browser-use) and Google Gemini. A stronger alternative to k3-mariner / Project Mariner.
+Entrypoint for the autonomous browsing agent.  The agent now uses a
+policy-driven architecture that treats different websites differently:
 
-Give it a task in plain English. It opens a browser, navigates the web, and completes it autonomously.
+  Tier 1 — high-value, stateful, anti-bot-sensitive sites (e.g. discord.com)
+            Full persistent profiles, manual checkpoints, strict challenge
+            handling.
+  Tier 2 — general web sites; reliability matters, shared profile optional.
+  Tier 3 — disposable/generic public web; ephemeral, fully autonomous.
 
----
+Run:
+    python3 agent.py
+or pass a task directly:
+    python3 agent.py "Go to wikipedia.org and summarise the main article"
+"""
 
-## Requirements
+import asyncio
+import os
+import sys
 
-- Python 3.12 (not 3.13 or 3.14 — they're incompatible with current deps)
-- Git
-- A free Gemini API key → https://aistudio.google.com/apikey
+from dotenv import load_dotenv
+from browser_use import Agent
+from browser_use.browser.browser import Browser, BrowserConfig
+from langchain_google_genai import ChatGoogleGenerativeAI
 
----
+from agent_result import AgentResult, AgentResultStatus
+from site_policies import get_policy, extract_domain
+from session_manager import resolve_profile
+from challenge_detector import detect, ChallengeStatus, status_to_result_reason
+from manual_checkpoint import wait_for_user_resolution, print_final_checkpoint_summary
 
-## Setup — Ubuntu / Mac / WSL2
+load_dotenv()
 
-### 1. Clone the repo
-```bash
-git clone https://github.com/innovative-vision/Project_Mariner_Scrapev2.git
-cd Project_Mariner_Scrapev2
-```
+_DEFAULT_TASK = "Go to google.com and tell me what the weather is in Melbourne, Australia"
 
-### 2. Install dependencies
-```bash
-pip3 install -r requirements.txt --break-system-packages
-```
 
-### 3. Install Playwright browser
-```bash
-playwright install chromium --with-deps
-```
+def _build_llm() -> ChatGoogleGenerativeAI:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not set. Add it to your .env file.")
+    return ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=api_key,
+        temperature=0.0,
+    )
 
-### 4. Add your API key
-```bash
-cp .env.example .env
-nano .env
-```
-Replace `your_api_key_here` with your Gemini key. Save with Ctrl+O → Enter → Ctrl+X.
 
-### 5. Run
-```bash
-python3 agent.py
-```
+def _build_browser(policy) -> Browser:
+    """Create a Browser whose configuration is driven by *policy*."""
+    profile_kwargs = resolve_profile(
+        policy.domain,
+        policy.tier,
+        policy.persistent_profile,
+    )
+    headless = policy.headless_allowed
 
----
+    config = BrowserConfig(
+        headless=headless,
+        **profile_kwargs,
+    )
+    return Browser(config=config)
 
-## Setup — Windows
 
-### 1. Install Python 3.12
-Download from https://www.python.org/downloads/release/python-3129/
-**Tick "Add Python to PATH" during install.**
+async def run_task(task: str) -> AgentResult:
+    """Run *task* and return a structured AgentResult."""
+    domain = extract_domain(task) or "unknown"
+    policy = get_policy(domain)
 
-### 2. Clone the repo
-Open PowerShell:
-```powershell
-cd Desktop
-git clone https://github.com/innovative-vision/Project_Mariner_Scrapev2.git
-cd Project_Mariner_Scrapev2
-```
+    print(f"\n[policy] domain={domain}  tier={policy.tier}  "
+          f"mode={policy.access_mode}  headless={policy.headless_allowed}  "
+          f"persistent_profile={policy.persistent_profile}")
 
-### 3. Install dependencies
-```powershell
-python -m pip install browser-use==0.1.40 langchain-google-genai==2.1.12 python-dotenv playwright
-```
+    # Hard stop for unsupported sites.
+    if policy.is_unsupported():
+        return AgentResult(
+            status=AgentResultStatus.SITE_POLICY_DISALLOWS_AUTONOMOUS_MODE,
+            domain=domain,
+            reason=f"Site policy marks {domain!r} as unsupported",
+        )
 
-### 4. Install Playwright browser
-```powershell
-python -m playwright install chromium
-```
+    browser = _build_browser(policy)
+    llm = _build_llm()
 
-### 5. Add your API key
-```powershell
-notepad .env
-```
-Type `GEMINI_API_KEY=your_key_here`, save and close Notepad.
+    # For manual-only sites, warn the user upfront.
+    if policy.requires_manual():
+        print(f"\n[policy] {domain!r} is configured for manual-checkpoint mode.")
+        print("         The browser will open for you to handle any challenges.\n")
 
-### 6. Run
-```powershell
-python agent.py
-```
+    agent = Agent(task=task, llm=llm, browser=browser)
 
----
+    try:
+        raw_result = await agent.run()
+    except Exception as exc:
+        return AgentResult(
+            status=AgentResultStatus.UNKNOWN_FAILURE,
+            domain=domain,
+            reason=str(exc),
+        )
+    finally:
+        # Attempt challenge detection on the final page state.
+        try:
+            playwright_page = browser.playwright_browser  # may not exist on all versions
+            if playwright_page and hasattr(playwright_page, "pages") and playwright_page.pages:
+                page = playwright_page.pages[-1]
+                challenge = await detect(page, strictness=policy.challenge_strictness)
 
-## Example tasks
+                if challenge != ChallengeStatus.OK:
+                    reason = status_to_result_reason(challenge)
+                    print(f"\n[challenge] {challenge.value} — {reason}")
 
-- `Go to wikipedia.org and tell me the main topic on the homepage today`
-- `Search Google for the latest iPhone price in Australia`
-- `Go to bom.gov.au and tell me the weather in Melbourne`
-- `Go to news.ycombinator.com and find the top post today`
+                    # Offer manual intervention when policy allows/requires it.
+                    if policy.requires_manual():
+                        resolved = await wait_for_user_resolution(
+                            page=page,
+                            domain=domain,
+                            reason=reason or challenge.value,
+                            strictness=policy.challenge_strictness,
+                        )
+                        print_final_checkpoint_summary(domain, resolved)
+                        if not resolved:
+                            return AgentResult(
+                                status=AgentResultStatus.MANUAL_VERIFICATION_REQUIRED,
+                                domain=domain,
+                                reason=reason,
+                            )
+        except Exception:
+            pass  # Best-effort challenge detection; don't mask the primary result.
 
----
+    output = str(raw_result) if raw_result is not None else ""
+    print("\n--- RESULT ---")
+    print(output)
+    return AgentResult(
+        status=AgentResultStatus.SUCCESS,
+        domain=domain,
+        output=output,
+    )
 
-## Notes
 
-- Your `.env` file is gitignored — your API key will NOT be committed.
-- The agent uses `gemini-2.5-flash` by default.
-- On Ubuntu/server (no GUI), `headless=True` is set in `agent.py` — the browser runs invisibly in the background.
-- On Windows, `headless=False` lets you watch the browser navigate in real time.
-- The `RuntimeError: Event loop is closed` message on Windows at the end is harmless — ignore it.
-- Free Gemini tier has rate limits — the agent will retry automatically if it hits them.
+def main() -> None:
+    print("Browser-Use Agent — Gemini Edition (tiered trust/autonomy model)")
+    print("Type your task below. The agent will browse the web and complete it.")
+    print("Example: 'Go to reddit.com and find the top post in r/Python today'\n")
+
+    if len(sys.argv) > 1:
+        task = " ".join(sys.argv[1:]).strip()
+        print(f"Task (from args): {task}\n")
+    else:
+        task = input("Task: ").strip()
+        if not task:
+            task = _DEFAULT_TASK
+            print(f"No task entered — using default: {task}\n")
+
+    result = asyncio.run(run_task(task))
+
+    if not result.succeeded():
+        print(f"\n[agent] Task did not complete successfully: {result}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
