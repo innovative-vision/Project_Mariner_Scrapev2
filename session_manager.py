@@ -61,14 +61,18 @@ def list_profiles() -> list:
 
 
 def resolve_profile(domain: str, tier: int, persistent_profile: bool) -> dict:
-    """Return a dict of browser-context kwargs for the given policy settings.
+    """Return a dict of BrowserConfig kwargs for the given policy settings.
 
-    The returned dict can be unpacked into BrowserConfig / context options
-    that control profile persistence.
+    browser-use passes profile persistence via ``extra_chromium_args``
+    (the ``--user-data-dir`` Chromium flag) because ``BrowserConfig`` does
+    not expose a ``user_data_dir`` parameter directly.
     """
     if persistent_profile or tier == 1:
-        return {"user_data_dir": get_profile_dir(domain)}
-    if tier == 2:
-        return {"user_data_dir": get_shared_profile_dir()}
-    # Tier 3 / ephemeral — no persistent profile
-    return {}
+        path = get_profile_dir(domain)
+    elif tier == 2:
+        path = get_shared_profile_dir()
+    else:
+        # Tier 3 / ephemeral — no persistent profile
+        return {}
+
+    return {"extra_chromium_args": [f"--user-data-dir={path}"]}
