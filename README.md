@@ -166,6 +166,85 @@ policies:
 
 ---
 
+## Gemini Shadow Courtroom — Backend
+
+An optional FastAPI backend that logs every Gemini exchange, fans it out to three independent AI judges, writes a courtroom transcript to Google Docs, and appends hourly summaries to Google Sheets.
+
+### Architecture
+
+```
+POST /log  ←─── Chrome extension (or curl)
+    │
+    ├── Google Docs  ── Courtroom transcript (prompt + response + 3 judge opinions)
+    ├── OpenRouter   ── Judge Dmitri · The Architect · Agent Zero (parallel)
+    └── Scheduler    ── Every 4 h → Gemini Flash summary → Google Sheets row
+```
+
+All integrations degrade gracefully — the server starts and `/health` returns `200` even with zero optional keys set.
+
+### Step 1 — Heartbeat test (Google Docs only)
+
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+Add to `.env`:
+```
+GOOGLE_CREDENTIALS_JSON=<base64-encoded service account JSON>
+GDOC_ID=<your doc id from the URL>
+```
+
+Start the server:
+```bash
+uvicorn backend.main:app --reload
+```
+
+Heartbeat test:
+```bash
+curl -X POST http://localhost:8000/log \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"What is 2+2?","response":"2+2 equals 4."}'
+```
+
+Open your Google Doc — you should see the exchange appended. ✓
+
+### Step 2 — Add judges
+
+Add to `.env`:
+```
+OPENROUTER_API_KEY=<your key from openrouter.ai>
+```
+
+Restart the server. The same `curl` call now returns three judge opinions and writes them into the Doc.
+
+### Step 3 — Summaries to Sheets
+
+Add to `.env`:
+```
+GSHEET_ID=<your sheet id from the URL>
+SUMMARY_INTERVAL_HOURS=4   # optional, default 4
+```
+
+The scheduler fires automatically every N hours, sends buffered exchanges to Gemini Flash, and appends a row to your Sheet. Empty window → logs "Nil".
+
+### Deploy to Railway
+
+1. Connect this repo to Railway.
+2. Set all env vars in the Railway dashboard.
+3. Railway uses `railway.toml` to start `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` automatically.
+
+### Google credentials setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a project → enable **Google Docs API** + **Google Sheets API**
+3. Create a **Service Account** → download the JSON key file
+4. Share your Google Doc and Sheet with the service account email (Editor)
+5. Base64-encode the JSON: `base64 -w 0 credentials.json`
+6. Paste the result into `GOOGLE_CREDENTIALS_JSON` in `.env`
+
+---
+
 ## Notes
 
 - Your `.env` file is gitignored — your API key will NOT be committed.
