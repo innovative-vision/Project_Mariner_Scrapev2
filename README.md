@@ -64,7 +64,8 @@ playwright install chromium --with-deps
 cp .env.example .env
 nano .env
 ```
-Replace `your_api_key_here` with your Gemini key. Save with Ctrl+O → Enter → Ctrl+X.
+Set the three Gemini key values (`GEMINI_API_KEY`, `GEMINI_API_KEY_2`, `GEMINI_API_KEY_3`) in `.env`.
+The agent will use the first non-empty key.
 
 ### 5. Run
 
@@ -109,7 +110,7 @@ python -m playwright install chromium
 ```powershell
 notepad .env
 ```
-Type `GEMINI_API_KEY=your_key_here`, save and close Notepad.
+Set `GEMINI_API_KEY`, `GEMINI_API_KEY_2`, and `GEMINI_API_KEY_3`, then save and close Notepad.
 
 ### 6. Run
 ```powershell

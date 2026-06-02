@@ -36,9 +36,16 @@ _DEFAULT_TASK = "Go to google.com and tell me what the weather is in Melbourne, 
 
 
 def _build_llm() -> ChatGoogleGenerativeAI:
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_keys = [
+        os.getenv("GEMINI_API_KEY", "").strip(),
+        os.getenv("GEMINI_API_KEY_2", "").strip(),
+        os.getenv("GEMINI_API_KEY_3", "").strip(),
+    ]
+    api_key = next((key for key in api_keys if key), "")
     if not api_key:
-        raise ValueError("GEMINI_API_KEY not set. Add it to your .env file.")
+        raise ValueError(
+            "No Gemini API key set. Add GEMINI_API_KEY, GEMINI_API_KEY_2, or GEMINI_API_KEY_3 to your .env file."
+        )
     return ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=api_key,
