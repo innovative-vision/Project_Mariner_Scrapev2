@@ -1,0 +1,40 @@
+# Site access policies for the tiered trust/autonomy model.
+#
+# Tiers:
+#   1 - High-value, stateful, anti-bot-sensitive sites. Full persistence,
+#       manual checkpoints, strictest challenge handling.
+#   2 - General web sites where reliability matters but full identity
+#       persistence is not always necessary.
+#   3 - Disposable / generic public web. Ephemeral, autonomous, lower cost on
+#       failure.
+#
+# access_mode options:
+#   api_first          - prefer API if available, fall back to browser
+#   browser            - autonomous browser
+#   browser_manual_only - browser with mandatory manual checkpoints
+#   unsupported        - do not attempt; return policy-disallows result
+#
+# challenge_strictness options:
+#   strict  - treat any unexpected page state as a challenge
+#   basic   - only flag obvious CAPTCHAs / bot walls
+
+policies:
+  # --- Tier 1 ---
+  discord.com:
+    tier: 1
+    access_mode: browser_manual_only
+    persistent_profile: true
+    headless_allowed: false
+    manual_checkpoint: true
+    challenge_strictness: strict
+    resource_blocking: false
+
+  # --- Global default (applies to any domain not listed above) ---
+  __default__:
+    tier: 3
+    access_mode: browser
+    persistent_profile: false
+    headless_allowed: true
+    manual_checkpoint: false
+    challenge_strictness: basic
+    resource_blocking: true
