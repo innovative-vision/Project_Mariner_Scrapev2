@@ -29,6 +29,7 @@ from site_policies import get_policy, extract_domain
 from session_manager import resolve_profile
 from challenge_detector import detect, ChallengeStatus, status_to_result_reason
 from manual_checkpoint import wait_for_user_resolution, print_final_checkpoint_summary
+from logger import RunLogger
 
 load_dotenv()
 
@@ -67,17 +68,22 @@ async def run_task(task: str) -> AgentResult:
     domain = extract_domain(task) or "unknown"
     policy = get_policy(domain)
 
+    # Initialise logger for this run
+    log = RunLogger(task=task, domain=domain, policy=policy)
+
     print(f"\n[policy] domain={domain}  tier={policy.tier}  "
           f"mode={policy.access_mode}  headless={policy.headless_allowed}  "
           f"persistent_profile={policy.persistent_profile}")
 
     # Hard stop for unsupported sites.
     if policy.is_unsupported():
-        return AgentResult(
+        result = AgentResult(
             status=AgentResultStatus.SITE_POLICY_DISALLOWS_AUTONOMOUS_MODE,
             domain=domain,
             reason=f"Site policy marks {domain!r} as unsupported",
         )
+        log.finish(result)
+        return result
 
     browser = _build_browser(policy)
     llm = _build_llm()
@@ -87,27 +93,59 @@ async def run_task(task: str) -> AgentResult:
         print(f"\n[policy] {domain!r} is configured for manual-checkpoint mode.")
         print("         The browser will open for you to handle any challenges.\n")
 
+    # Hook into browser-use action callbacks to capture URLs + actions
+    def _on_action(action_info):
+        """Callback fired by browser-use before each agent action."""
+        try:
+            action_type = action_info.get("action", "unknown")
+            detail = str(action_info.get("params", ""))
+            url = action_info.get("url", "")
+            log.action(action_type, detail=detail, url=url)
+            if url:
+                log.url_visited(url)
+        except Exception:
+            pass  # Never let logging break the agent
+
     agent = Agent(task=task, llm=llm, browser=browser)
 
+    # Attach action hook if the version supports it
+    try:
+        agent.register_action_hook(_on_action)
+    except AttributeError:
+        pass
+
+    result = None
     try:
         raw_result = await agent.run()
     except Exception as exc:
-        return AgentResult(
+        result = AgentResult(
             status=AgentResultStatus.UNKNOWN_FAILURE,
             domain=domain,
             reason=str(exc),
         )
+        log.finish(result)
+        return result
     finally:
         # Attempt challenge detection on the final page state.
         try:
             playwright_page = browser.playwright_browser  # may not exist on all versions
             if playwright_page and hasattr(playwright_page, "pages") and playwright_page.pages:
                 page = playwright_page.pages[-1]
+
+                # Log the final URL
+                try:
+                    final_url = page.url
+                    if final_url:
+                        log.url_visited(final_url)
+                except Exception:
+                    pass
+
                 challenge = await detect(page, strictness=policy.challenge_strictness)
 
                 if challenge != ChallengeStatus.OK:
                     reason = status_to_result_reason(challenge)
                     print(f"\n[challenge] {challenge.value} — {reason}")
+                    log.challenge_detected(challenge.value, url=page.url)
 
                     # Offer manual intervention when policy allows/requires it.
                     if policy.requires_manual():
@@ -118,23 +156,30 @@ async def run_task(task: str) -> AgentResult:
                             strictness=policy.challenge_strictness,
                         )
                         print_final_checkpoint_summary(domain, resolved)
+                        log.checkpoint(domain, reason or challenge.value, resolved)
+
                         if not resolved:
-                            return AgentResult(
+                            result = AgentResult(
                                 status=AgentResultStatus.MANUAL_VERIFICATION_REQUIRED,
                                 domain=domain,
                                 reason=reason,
                             )
+                            log.finish(result)
+                            return result
         except Exception:
             pass  # Best-effort challenge detection; don't mask the primary result.
 
     output = str(raw_result) if raw_result is not None else ""
     print("\n--- RESULT ---")
     print(output)
-    return AgentResult(
+
+    result = AgentResult(
         status=AgentResultStatus.SUCCESS,
         domain=domain,
         output=output,
     )
+    log.finish(result)
+    return result
 
 
 def main() -> None:
