@@ -4,7 +4,7 @@ aiohttp>=3.9.0
 python-dotenv>=1.0.0
 
 # ── AI providers — uncomment only the one(s) you use ─────────────────────────
-anthropicanthropicanthropicanthropic>=0.39.0          # ACTIVE_AI_PROVIDER=claude
+anthropic>=0.39.0           # ACTIVE_AI_PROVIDER=claude
 # openai>=1.50.0              # ACTIVE_AI_PROVIDER=openai
 # google-generativeai>=0.8.0  # ACTIVE_AI_PROVIDER=gemini
 # groq>=0.11.0                # ACTIVE_AI_PROVIDER=groq
