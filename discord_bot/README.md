@@ -7,7 +7,7 @@ A focused Discord bot with a `/google` command that returns the top 10 search re
 ```bash
 cd discord_bot
 pip install -r requirements.txt
-cp .env.example .env   # then fill in your keys
+cp .env.example .env   # fill in your keys
 python bot.py
 ```
 
@@ -15,52 +15,58 @@ python bot.py
 
 ```
 discord_bot/
-├── bot.py              # Entry point — auto-loads all cogs
-├── config.py           # Reads .env into typed attributes
+├── bot.py                # Entry point — auto-loads all cogs
+├── config.py             # Reads .env into typed attributes
+├── Procfile              # Railway: worker process
+├── railway.toml          # Railway: 1 replica, restart on failure
 ├── cogs/
-│   ├── google.py       # /google command
+│   ├── google.py         # /google command
 │   └── _skeleton_cog.py  # Template for new cogs (ignored by loader)
 └── utils/
-    ├── search.py       # Serper.dev / Google CSE abstraction
-    └── ai_providers.py # Pluggable AI backends for TLDRs
+    ├── search.py         # Brave Search / Google CSE abstraction
+    └── ai_providers.py   # AI backends with automatic fallback
 ```
+
+## Railway Deployment
+
+This bot runs as a single **worker** service (no HTTP server needed).
+
+1. Create a new Railway project and add a service pointing at this repo
+2. Set the root directory to `discord_bot/`
+3. Add all env vars from `.env.example` in the Railway dashboard
+4. Deploy — Railway picks up `Procfile` automatically
+
+The `railway.toml` enforces `numReplicas = 1` so you won't accidentally run duplicate bot instances.
 
 ## Adding a New Cog
 
 1. Copy `cogs/_skeleton_cog.py` → `cogs/your_feature.py`
 2. Rename the class and implement your commands
-3. Restart the bot — it auto-discovers and loads everything in `cogs/` that doesn't start with `_`
+3. Restart — the bot auto-discovers everything in `cogs/` not starting with `_`
 
 ## Search API
 
-| Provider | Free tier | Paid | Notes |
-|---|---|---|---|
-| **Serper.dev** (recommended) | Trial credits | ~$50 / 50k searches | Fast, images, knowledge graph |
-| Google Custom Search API | 100 req/day | $5 / 1k after | Official, setup required |
-
-Set `SEARCH_PROVIDER=serper` or `SEARCH_PROVIDER=google_cse` in `.env`.
-
-## AI Provider for TLDRs
-
-Set `ACTIVE_AI_PROVIDER` in `.env` and uncomment the matching line in `requirements.txt`:
-
-| Value | Model used | SDK |
+| Provider | Free tier | Notes |
 |---|---|---|
-| `claude` | claude-haiku-4-5 | `anthropic` |
-| `openai` | gpt-4o-mini | `openai` |
-| `gemini` | gemini-1.5-flash | `google-generativeai` |
-| `groq` | llama-3.3-70b-versatile | `groq` |
-| `cerebras` | llama-3.3-70b | `cerebras-cloud-sdk` |
+| **Brave Search** (default) | 2,000 req/month | No credit card — get key at api.search.brave.com |
+| Google Custom Search | 100 req/day | Requires Custom Search Engine setup |
 
-## `/google` Command Output
+Set `SEARCH_PROVIDER=brave` or `google_cse` in `.env`.
 
-**Embed 1 — Top result**
-- Title (linked), snippet, featured image
-- AI TLDR at the bottom
+## AI for TLDRs
 
-**Embed 2 — Results 2–10**
-- Numbered list, link + AI TLDR per result
+| Role | Provider | Model | Notes |
+|---|---|---|---|
+| **Primary** | Groq | llama-3.3-70b-versatile | Fast inference, generous free tier |
+| **Fallback** | OpenAI | gpt-4o-mini | Auto-kicks in if Groq fails |
+| Backup | Claude | claude-haiku-4-5 | Swap via `ACTIVE_AI_PROVIDER=claude` |
+| Backup | Gemini | gemini-1.5-flash | Swap via `ACTIVE_AI_PROVIDER=gemini` |
+| Backup | Cerebras | llama-3.3-70b | Swap via `ACTIVE_AI_PROVIDER=cerebras` |
 
-## Environment Variables
+Both `GROQ_API_KEY` and `OPENAI_API_KEY` are required (primary + fallback).
+Backup provider keys are only needed if you switch `ACTIVE_AI_PROVIDER`.
 
-See `.env.example` for the full list.
+## `/google` Output
+
+**Embed 1 — Top result:** title, snippet, image, AI TLDR 
+**Embed 2 — Results 2–10:** numbered list, link + AI TLDR each

@@ -1,6 +1,7 @@
 """
 Search provider abstraction.
-Switch between Serper.dev and Google Custom Search via SEARCH_PROVIDER in .env.
+Default: Brave Search API  — 2,000 free requests/month, no credit card required.
+Alternative: Google Custom Search JSON API  — 100 free requests/day.
 """
 from __future__ import annotations
 import aiohttp
@@ -10,58 +11,55 @@ from config import Config
 async def search_google(query: str, num_results: int = 10) -> list[dict]:
     """
     Returns up to `num_results` dicts:
-      { title, url, snippet, image }  — image is None for results 2-10
+      { title, url, snippet, image }  — image only populated for result #1
     """
     match Config.SEARCH_PROVIDER:
-        case "serper":
-            return await _serper_search(query, num_results)
+        case "brave":
+            return await _brave_search(query, num_results)
         case "google_cse":
             return await _google_cse_search(query, num_results)
         case _:
             raise ValueError(
                 f"Unknown SEARCH_PROVIDER: {Config.SEARCH_PROVIDER!r}. "
-                "Choose 'serper' or 'google_cse'."
+                "Choose 'brave' or 'google_cse'."
             )
 
 
-async def _serper_search(query: str, num: int) -> list[dict]:
+async def _brave_search(query: str, num: int) -> list[dict]:
     """
-    Serper.dev — recommended.
-    Sign up at https://serper.dev  (free trial, then ~$50 for 50k searches).
-    Returns real Google results including knowledge graph images.
+    Brave Search API  — https://api.search.brave.com
+    Free tier: 2,000 requests/month, no credit card required.
+    Sign up and grab your key at https://api.search.brave.com/app/keys
     """
-    url = "https://google.serper.dev/search"
+    url = "https://api.search.brave.com/res/v1/web/search"
     headers = {
-        "X-API-KEY": Config.SERPER_API_KEY,
-        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": Config.BRAVE_API_KEY,
     }
-    payload = {"q": query, "num": num}
+    params = {"q": query, "count": min(num, 20)}
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload, headers=headers) as resp:
+        async with session.get(url, headers=headers, params=params) as resp:
             resp.raise_for_status()
             data = await resp.json()
 
-    # Best-effort image for the first result
-    kg = data.get("knowledgeGraph", {})
-    images = data.get("images", [])
-    top_image: str | None = kg.get("imageUrl") or (images[0].get("imageUrl") if images else None)
-
     results: list[dict] = []
-    for i, item in enumerate(data.get("organic", [])[:num]):
+    for i, item in enumerate(data.get("web", {}).get("results", [])[:num]):
+        thumbnail = item.get("thumbnail", {}) or {}
         results.append({
             "title": item.get("title", ""),
-            "url": item.get("link", ""),
-            "snippet": item.get("snippet", ""),
-            "image": top_image if i == 0 else None,
+            "url": item.get("url", ""),
+            "snippet": item.get("description", ""),
+            "image": thumbnail.get("src") if i == 0 and thumbnail else None,
         })
     return results
 
 
 async def _google_cse_search(query: str, num: int) -> list[dict]:
     """
-    Google Custom Search JSON API.
-    Set up at https://programmablesearchengine.google.com  (100 free/day).
+    Google Custom Search JSON API  — 100 free requests/day.
+    Setup: https://programmablesearchengine.google.com
     """
     url = "https://www.googleapis.com/customsearch/v1"
     params = {
@@ -79,8 +77,7 @@ async def _google_cse_search(query: str, num: int) -> list[dict]:
     for i, item in enumerate(data.get("items", [])[:num]):
         image: str | None = None
         if i == 0:
-            pagemap = item.get("pagemap", {})
-            cse_images = pagemap.get("cse_image", [])
+            cse_images = item.get("pagemap", {}).get("cse_image", [])
             image = cse_images[0].get("src") if cse_images else None
         results.append({
             "title": item.get("title", ""),
