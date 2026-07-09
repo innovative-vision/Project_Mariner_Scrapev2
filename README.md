@@ -1,6 +1,6 @@
-# Browser-Use Agent — Gemini Edition
+# Browser-Use Agent
 
-Open-source browser automation agent powered by [browser-use](https://github.com/browser-use/browser-use) and Google Gemini. A stronger alternative to k3-mariner / Project Mariner.
+Open-source browser automation agent powered by [browser-use](https://github.com/browser-use/browser-use) with a configurable LLM backend. By default it uses NVIDIA NIM with `z-ai/glm-5.2`, while still supporting Gemini as an optional fallback.
 
 Give it a task in plain English. It opens a real browser, navigates the web, and completes it autonomously — with a **tiered trust/autonomy model** so different websites get the right level of care.
 
@@ -33,7 +33,7 @@ The agent now uses a policy-driven architecture that classifies every target dom
 
 - Python 3.12 (not 3.13 or 3.14 — they're incompatible with current deps)
 - Git
-- A free Gemini API key → https://aistudio.google.com/apikey
+- A NVIDIA NIM API key for the default backend
 
 ---
 
@@ -64,7 +64,7 @@ playwright install chromium --with-deps
 cp .env.example .env
 nano .env
 ```
-Replace `your_api_key_here` with your Gemini key. Save with Ctrl+O → Enter → Ctrl+X.
+Set `NVIDIA_NIM_API_KEY` to your NVIDIA NIM key. Save with Ctrl+O → Enter → Ctrl+X.
 
 ### 5. Run
 
@@ -109,7 +109,7 @@ python -m playwright install chromium
 ```powershell
 notepad .env
 ```
-Type `GEMINI_API_KEY=your_key_here`, save and close Notepad.
+Update `.env` with your NVIDIA NIM credentials, then save and close Notepad.
 
 ### 6. Run
 ```powershell
@@ -169,7 +169,8 @@ policies:
 ## Notes
 
 - Your `.env` file is gitignored — your API key will NOT be committed.
-- The agent uses `gemini-2.5-flash` by default.
+- The agent uses NVIDIA NIM `z-ai/glm-5.2` by default.
+- To switch back to Gemini, set `LLM_PROVIDER=gemini` and provide `GEMINI_API_KEY`.
 - Persistent browser profiles are stored in `.profiles/` (gitignored).
 - On Ubuntu/server (no GUI), Tier 3 sites run `headless=True` automatically.
 - On Windows (and Tier 1 sites), `headless=False` lets you watch the browser.

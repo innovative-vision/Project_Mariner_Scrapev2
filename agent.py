@@ -1,4 +1,4 @@
-"""Browser-Use Agent — Gemini Edition (tiered trust/autonomy model).
+"""Browser-Use Agent (tiered trust/autonomy model).
 
 Entrypoint for the autonomous browsing agent.  The agent now uses a
 policy-driven architecture that treats different websites differently:
@@ -18,10 +18,12 @@ or pass a task directly:
 import asyncio
 import os
 import sys
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 from browser_use import Agent
 from browser_use.browser.browser import Browser, BrowserConfig
+from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from agent_result import AgentResult, AgentResultStatus
@@ -35,12 +37,58 @@ load_dotenv()
 _DEFAULT_TASK = "Go to google.com and tell me what the weather is in Melbourne, Australia"
 
 
-def _build_llm() -> ChatGoogleGenerativeAI:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY not set. Add it to your .env file.")
+@dataclass(frozen=True)
+class LLMConfig:
+    provider: str
+    model: str
+    api_key_env: str
+    base_url: str | None = None
+
+
+def _require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise ValueError(f"{name} not set. Add it to your .env file.")
+    return value
+
+
+def _get_llm_config() -> LLMConfig:
+    provider = os.getenv("LLM_PROVIDER", "nvidia_nim").strip().lower()
+
+    if provider in {"nvidia", "nvidia_nim", "nim"}:
+        return LLMConfig(
+            provider="nvidia_nim",
+            model=os.getenv("NVIDIA_NIM_MODEL", "z-ai/glm-5.2"),
+            api_key_env="NVIDIA_NIM_API_KEY",
+            base_url=os.getenv("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"),
+        )
+
+    if provider == "gemini":
+        return LLMConfig(
+            provider="gemini",
+            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            api_key_env="GEMINI_API_KEY",
+        )
+
+    raise ValueError(
+        "Unsupported LLM_PROVIDER. Use 'nvidia_nim' (default) or 'gemini'."
+    )
+
+
+def _build_llm():
+    config = _get_llm_config()
+    api_key = _require_env(config.api_key_env)
+
+    if config.provider == "nvidia_nim":
+        return ChatOpenAI(
+            model=config.model,
+            api_key=api_key,
+            base_url=config.base_url,
+            temperature=0.0,
+        )
+
     return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
+        model=config.model,
         google_api_key=api_key,
         temperature=0.0,
     )
@@ -138,7 +186,10 @@ async def run_task(task: str) -> AgentResult:
 
 
 def main() -> None:
-    print("Browser-Use Agent — Gemini Edition (tiered trust/autonomy model)")
+    llm_config = _get_llm_config()
+
+    print("Browser-Use Agent (tiered trust/autonomy model)")
+    print(f"LLM backend: {llm_config.provider} ({llm_config.model})")
     print("Type your task below. The agent will browse the web and complete it.")
     print("Example: 'Go to reddit.com and find the top post in r/Python today'\n")
 
